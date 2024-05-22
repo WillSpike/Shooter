@@ -7,16 +7,19 @@ from collisions import check_collision
 class MainBullet(Particle):
     def __init__(self, x, y):
         super().__init__(x, y, 0, -4, 30, 7, 2)  # Tir principal centré
-
+        self.is_dead = False
+       
 class SideBullet(Particle):
     def __init__(self, x, y, speed_x, color):
         super().__init__(x, y, speed_x, -4, 30, color, size=1)  # Tirs latéraux avec une couleur différente
+        self.is_dead = False
 
 class Player:
     def __init__(self, x, y):        
         self.x = x
         self.y = y
-        self.bullets = []   
+        self.bullets = [] 
+        self.score = 0  
 
     def update(self, enemies):
         if pyxel.btn(pyxel.KEY_LEFT):
@@ -38,19 +41,8 @@ class Player:
     def update_bullets(self, enemies):
         for bullet in self.bullets:
             bullet.update()
-            if bullet.x > pyxel.width or bullet.y < 0:  # Supprime les balles qui sortent de l'écran
-                self.bullets.remove(bullet)
-            else:
-                # Vérifier les collisions avec les ennemis
-                for enemy in enemies:
-                    if check_collision(enemy, bullet):
-                        bullet.hit = True
-                        if enemy in enemies:
-                            # Créer une nouvelle explosion à la position de l'ennemi
-                            explosion = ExplosionParticle(enemy.x, enemy.y, num_particles=20 )
-                            game.explosions.append(explosion)  # Ajouter l'explosion à la liste des explosions du jeu
-                            enemies.remove(enemy)
-                        break  
+            if bullet.x > pyxel.width or bullet.y < 0:
+                bullet.is_dead = True
 
     def shoot_main(self):
         main_bullet = MainBullet(self.x + 7, self.y)  
@@ -59,20 +51,19 @@ class Player:
 
     def shoot_side(self):       
         side_bullet_left = SideBullet(self.x + 1, self.y + 6, -2, 11)              
-        side_bullet_right = SideBullet(self.x + 15, self.y +6 , 2, 11)
+        side_bullet_right = SideBullet(self.x + 15, self.y + 6, 2, 11)
         side_bullet_left.hit = False
         side_bullet_right.hit = False
         self.bullets.extend([side_bullet_left, side_bullet_right])  
 
     def draw(self):       
-        # Dessiner le vaisseau dans SOOTER.pyxres
         pyxel.blt(self.x, self.y, 0, 0, 0, 16, 16, 1)
-        # Dessiner les balles
         for bullet in self.bullets:
-            bullet.draw()             
+            bullet.draw()      
+        pyxel.text(5, 5, f"Score: {self.score}", pyxel.COLOR_WHITE)        
 
 class Enemy:
-    def __init__(self,x, y, speed_x, speed_y, size, color):               
+    def __init__(self, x, y, speed_x, speed_y, size, color):               
         self.x = x
         self.y = y
         self.speed_x = speed_x
@@ -80,7 +71,8 @@ class Enemy:
         self.size = size
         self.color = color
         self.frame_index = 0
-        self.frame_counter = 0      
+        self.frame_counter = 0  
+        self.is_dead = False    
 
     def update(self):     
         self.x += self.speed_x
@@ -91,7 +83,7 @@ class Enemy:
             self.frame_counter = 0
 
     def draw(self):
-        pyxel.blt(self.x, self.y, 0, self.frame_index * 16, 16, 16, 16, 0)
+        pyxel.blt(self.x, self.y, 0, self.frame_index * 16, 16, -16, -16, 0) 
 
 class Game:
     def __init__(self):
@@ -104,12 +96,12 @@ class Game:
         self.state = 'menu'
         self.menu = Menu()  
         self.explosions = [] 
-
+      
     def update(self):
         if self.state == 'menu':
             action = self.menu.update()
             if action == 'play':
-                self.state = 'play'
+                self.state = 'play'               
             elif action == 'scores':
                 self.state = 'scores'
             elif action == 'quit':
@@ -119,20 +111,13 @@ class Game:
         elif self.state == 'play':
             if not self.game_over:
                 self.player.update(self.enemies)
-                self.player.update_bullets(self.enemies) 
 
+                # Mettre à jour les ennemis
                 for enemy in self.enemies:
                     enemy.update()
-                    for bullet in self.player.bullets:
-                        if check_collision(enemy, bullet):
-                            bullet.hit = True
-                            if enemy in self.enemies:  
-                                self.enemies.remove(enemy)
-                            break  
 
-                # Mettre à jour et dessiner les explosions
-                for explosion in self.explosions:
-                    explosion.update()                    
+                self.handle_collisions()
+                self.update_explosions()
 
                 self.frame_count += 1
                 if self.frame_count % 60 == 0:
@@ -143,9 +128,33 @@ class Game:
             else:
                 if pyxel.btnp(pyxel.KEY_R):
                     self.restart()
+                if pyxel.btnp(pyxel.KEY_M):
+                    self.state = 'menu'
+                    self.restart()
 
         elif self.state == 'scores':
             pass     
+
+    def handle_collisions(self):
+        for bullet in self.player.bullets:
+            bullet.update()
+            if bullet.x > pyxel.width or bullet.y < 0:
+                bullet.is_dead = True
+            else:
+                for enemy in self.enemies:
+                    if check_collision(enemy, bullet):
+                        bullet.is_dead = True
+                        enemy.is_dead = True
+                        explosion = ExplosionParticle(enemy.x, enemy.y, num_particles=20)
+                        self.explosions.append(explosion)
+                        self.player.score += 1
+
+        self.player.bullets = [bullet for bullet in self.player.bullets if not bullet.is_dead]
+        self.enemies = [enemy for enemy in self.enemies if not enemy.is_dead]
+
+    def update_explosions(self):
+        for explosion in self.explosions:
+            explosion.update()
 
     def restart(self):
         self.player = Player(100, 150)
@@ -153,12 +162,13 @@ class Game:
         self.explosions = []
         self.frame_count = 0 
         self.game_over = False
+        self.score = 0
 
     def add_enemy(self):
         x = random.randint(0, pyxel.width - 10)
         y = 0
         speed_x = random.choice([-1, 1])
-        speed_y = random.randint(1, 2)
+        speed_y = random.uniform(0.5, 1) 
         size = 10
         color = 8
         new_enemy = Enemy(x, y, speed_x, speed_y, size, color)
@@ -177,19 +187,19 @@ class Game:
 
     def draw(self):
         pyxel.cls(0)
-        if self.state == 'menu':
+        if self.state == 'menu':           
             self.menu.draw()
         elif self.state == 'play':
-            self.player.draw()    
+            self.player.draw()                
             for enemy in self.enemies:
                 enemy.draw() 
-                   
             for explosion in self.explosions:
                 explosion.draw()
-
             if self.game_over:
+                pyxel.text(100, 86, "Score: " + str(self.player.score), pyxel.COLOR_GREEN)
                 pyxel.text(100, 96, "GAME OVER", pyxel.COLOR_RED)
                 pyxel.text(80, 106, "Press R to Restart", pyxel.COLOR_WHITE)
-
+                pyxel.text(80, 116, "Press M to Menu", pyxel.COLOR_WHITE)
+                
 game = Game()
 pyxel.run(game.update, game.draw)
